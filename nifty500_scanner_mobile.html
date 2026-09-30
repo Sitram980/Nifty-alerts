@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#07101c">
+<title>Nifty 500 Scanner</title>
+<style>
+:root{--bg:#07101c;--p:#0e1929;--p2:#142239;--line:#24344d;--tx:#edf4ff;--mu:#91a1ba;--buy:#45d7a2;--sell:#ff6875;--blue:#69b8ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px system-ui,sans-serif}
+header{padding:12px 14px;background:#0b1525;border-bottom:1px solid var(--line)}h1{font-size:18px;margin:0}.sub{font-size:11px;color:var(--mu);margin-top:3px}
+.wrap{padding:10px;max-width:720px;margin:auto}
+.ctl{display:grid;grid-template-columns:1fr 1fr;gap:8px;background:var(--p);border:1px solid var(--line);border-radius:12px;padding:10px}
+.f{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--mu)}.full{grid-column:1/-1}
+input,select,button{width:100%;background:#091322;color:var(--tx);border:1px solid #344661;border-radius:8px;padding:10px;font-size:14px}
+button{background:#1d4ed8;border-color:#1d4ed8;font-weight:700}button.sec{background:#172741;border-color:#344661}button:disabled{opacity:.5}
+.st{margin:10px 0;padding:9px 11px;border-radius:9px;background:#101c2d;border:1px solid var(--line);color:#c4d0e5;font-size:12px}.st.err{border-color:#71343d;color:#ffb1b8}
+.bar{height:4px;background:#1d2a40;border-radius:3px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;width:0;background:var(--blue)}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}.c{background:var(--p);border:1px solid var(--line);border-radius:10px;padding:8px}
+.c b{display:block;font-size:17px;margin-top:2px}.mu{color:var(--mu);font-size:11px}
+.tabs{display:flex;border-bottom:1px solid var(--line);margin-bottom:8px}.tabs div{flex:1;text-align:center;padding:10px;color:var(--mu);cursor:pointer}.tabs .on{color:var(--blue);border-bottom:2px solid var(--blue);font-weight:700}
+.item{background:var(--p);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px}
+.r{display:flex;justify-content:space-between;gap:8px;align-items:center}.r+.r{margin-top:5px;font-size:12px}
+.bd{padding:2px 8px;border-radius:12px;font-size:11px;font-weight:800;margin-left:6px}.BUY{background:#103b30;color:#64e2b1}.SELL{background:#472028;color:#ff8e97}.NEUTRAL{background:#29364b;color:#bdc8da}
+.pos{color:var(--buy)}.neg{color:var(--sell)}.blue{color:var(--blue)}.note{font-size:11px;color:var(--mu);line-height:1.5;margin:10px 2px}
+</style></head><body>
+<header><h1>NIFTY 500 Scanner</h1><div class="sub">Multi-kernel regression signal • sector rotation • flow proxies</div></header>
+<div class="wrap">
+<div class="ctl">
+ <label class="f">Kernel<select id="kernel"></select></label>
+ <label class="f">Bandwidth<input id="bw" type="number" min="2" max="200" value="14" inputmode="numeric"></label>
+ <label class="f">Timeframe<select id="tf"><option value="1d">Daily</option><option value="1wk">Weekly</option></select></label>
+ <label class="f">Signal<select id="sig"><option value="ALL">All</option><option>BUY</option><option>SELL</option></select></label>
+ <label class="f full">Sector<select id="sec"><option value="ALL">All sectors</option></select></label>
+ <label class="f full">Search<input id="q" placeholder="RELIANCE / TCS / HDFCBANK"></label>
+ <button id="run">Scan NIFTY 500</button><button id="stop" class="sec">Stop</button>
+</div>
+<div class="st" id="status">Ready. Tap Scan. Needs internet.<div class="bar"><i id="pb"></i></div></div>
+<div class="cards">
+ <div class="c"><span class="mu">Loaded</span><b id="nU">—</b></div>
+ <div class="c"><span class="mu">BUY</span><b class="pos" id="nB">—</b></div>
+ <div class="c"><span class="mu">SELL</span><b class="neg" id="nS">—</b></div>
+ <div class="c"><span class="mu">Positive RS</span><b class="blue" id="nR">—</b></div>
+ <div class="c"><span class="mu">FII net ₹Cr</span><b id="fii">—</b></div>
+ <div class="c"><span class="mu">DII net ₹Cr</span><b id="dii">—</b></div>
+</div>
+<div class="tabs"><div class="on" data-t="0">Stocks</div><div data-t="1">Sectors</div><div data-t="2">Flows</div></div>
+<div id="tab0"><label class="f" style="margin-bottom:8px">Sort by<select id="sort"><option value="rs">Relative strength</option><option value="r20">20-bar %</option><option value="r5">5-bar %</option><option value="cmf">CMF20</option><option value="flow">Flow ₹Cr</option><option value="symbol">Symbol (A-Z)</option></select></label><div id="list"></div></div>
+<div id="tab1" hidden><div class="mu" style="margin-bottom:6px">Tap a sector to filter stocks.</div><div id="secList"></div></div>
+<div id="tab2" hidden><div class="item" id="inst">Loading…</div>
+<div class="note"><b>Note:</b> FII/DII are market-wide cash-market flows (provisional), not per-stock. CMF20 and Flow ₹Cr* are price×volume accumulation proxies, not actual institutional trades.</div></div>
+<p class="note">Not investment advice. Data from third-party services; may be delayed or unavailable.</p>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const UNI_URLS=["https://huggingface.co/spaces/riteshcp/Market_Analysis_Tool/resolve/main/ind_nifty500list.csv","https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv"];
+const DATA_API="https://yfin-h.tigzig.com/v1/get-all-prices/";
+const INST_URL="https://chirag127.github.io/fii-dii-activity-api/data/latest.json";
+// Built-in fallback (large caps) used if the NIFTY 500 list can't be downloaded
+const FALLBACK=`RELIANCE|Energy,TCS|IT,HDFCBANK|Banks & Financials,ICICIBANK|Banks & Financials,INFY|IT,BHARTIARTL|Telecom,ITC|FMCG,SBIN|Banks & Financials,LT|Industrials & Construction,HINDUNILVR|FMCG,KOTAKBANK|Banks & Financials,AXISBANK|Banks & Financials,BAJFINANCE|Banks & Financials,MARUTI|Auto,SUNPHARMA|Pharma & Healthcare,NTPC|Energy,ONGC|Energy,TATAMOTORS|Auto,M&M|Auto,HCLTECH|IT,ULTRACEMCO|Industrials & Construction,POWERGRID|Energy,ADANIENT|Industrials & Construction,ADANIPORTS|Logistics,COALINDIA|Metals & Mining,TITAN|Consumer,ASIANPAINT|Chemicals,BAJAJFINSV|Banks & Financials,WIPRO|IT,NESTLEIND|FMCG,JSWSTEEL|Metals & Mining,TATASTEEL|Metals & Mining,TECHM|IT,HINDALCO|Metals & Mining,GRASIM|Industrials & Construction,CIPLA|Pharma & Healthcare,DRREDDY|Pharma & Healthcare,EICHERMOT|Auto,BPCL|Energy,TRENT|Consumer,HEROMOTOCO|Auto,APOLLOHOSP|Pharma & Healthcare,DIVISLAB|Pharma & Healthcare,BRITANNIA|FMCG,INDUSINDBK|Banks & Financials,SBILIFE|Insurance,HDFCLIFE|Insurance,BAJAJ-AUTO|Auto,SHRIRAMFIN|Banks & Financials,LTIM|IT,BEL|Defence,HAL|Defence,DLF|Realty,GODREJPROP|Realty,PIDILITIND|Chemicals,SIEMENS|Industrials & Construction,ABB|Industrials & Construction,TATAPOWER|Energy,IOC|Energy,GAIL|Energy,VEDL|Metals & Mining,JINDALSTEL|Metals & Mining,SAIL|Metals & Mining,NMDC|Metals & Mining,BANKBARODA|Banks & Financials,PNB|Banks & Financials,CANBK|Banks & Financials,IDFCFIRSTB|Banks & Financials,FEDERALBNK|Banks & Financials,AUBANK|Banks & Financials,CHOLAFIN|Banks & Financials,MUTHOOTFIN|Banks & Financials,PFC|Banks & Financials,RECLTD|Banks & Financials,IRFC|Banks & Financials,LICI|Insurance,ICICIPRULI|Insurance,ICICIGI|Insurance,ZOMATO|Consumer,DMART|Consumer,NYKAA|Consumer,INDIGO|Logistics,IRCTC|Travel & Hospitality,INDHOTEL|Travel & Hospitality,TVSMOTOR|Auto,ASHOKLEY|Auto,BOSCHLTD|Auto,MOTHERSON|Auto,BHARATFORG|Auto,MRF|Auto,LUPIN|Pharma & Healthcare,TORNTPHARM|Pharma & Healthcare,AUROPHARMA|Pharma & Healthcare,ZYDUSLIFE|Pharma & Healthcare,MAXHEALTH|Pharma & Healthcare,PERSISTENT|IT,COFORGE|IT,MPHASIS|IT,OFSS|IT,TATAELXSI|IT,DIXON|Consumer,HAVELLS|Consumer,VOLTAS|Consumer,POLYCAB|Industrials & Construction,CUMMINSIND|Industrials & Construction,BHEL|Industrials & Construction,MAZDOCK|Defence,COCHINSHIP|Defence,BDL|Defence,SRF|Chemicals,UPL|Chemicals,DEEPAKNTR|Chemicals,TATACONSUM|FMCG,DABUR|FMCG,GODREJCP|FMCG,MARICO|FMCG,COLPAL|FMCG,VBL|FMCG,AMBUJACEM|Industrials & Construction,SHREECEM|Industrials & Construction,ACC|Industrials & Construction,ADANIGREEN|Energy,ADANIPOWER|Energy,JSWENERGY|Energy,NHPC|Energy,SUZLON|Industrials & Construction,PAYTM|Banks & Financials,PIIND|Chemicals,ASTRAL|Industrials & Construction,SUPREMEIND|Industrials & Construction`.split(",").map(s=>{const[a,b]=s.split("|");return{symbol:a,industry:b,company:a,sector:b}});
+
+const F={
+gaussian:(x,b)=>Math.exp(-(x*x/(b*b))/2)/Math.sqrt(2*Math.PI),
+triangular:(x,b)=>Math.abs(x/b)<=1?1-Math.abs(x/b):0,
+epanechnikov:(x,b)=>Math.abs(x/b)<=1?.75*(1-x*x/(b*b)):0,
+logistic:(x,b)=>1/(Math.exp(x/b)+2+Math.exp(-x/b)),
+cosine:(x,b)=>Math.abs(x/b)<=1?Math.PI/4*Math.cos(Math.PI*x/(2*b)):0,
+laplace:(x,b)=>Math.exp(-Math.abs(x/b))/(2*b),
+exponential:(x,b)=>Math.exp(-Math.abs(x/b))/b,
+quartic:(x,b)=>Math.abs(x/b)<=1?15/16*Math.pow(1-x*x/(b*b),2):0,
+silverman:(x,b)=>Math.abs(x/b)<=.5?.5*Math.exp(-(x/b)/2)*Math.sin((x/b)/2+Math.PI/4):0,
+cauchy:(x,b)=>1/(Math.PI*b*(1+x*x/(b*b))),
+tent:(x,b)=>Math.abs(x/b)<=1?1-Math.abs(x/b):0,
+sinc:(x,b)=>x===0?1:Math.sin(Math.PI*x/b)/(Math.PI*x/b),
+wave:(x,b)=>Math.abs(x/b)<=1?(1-Math.abs(x/b))*Math.cos(Math.PI*x/b):0,
+parabolic:(x,b)=>Math.abs(x/b)<=1?1-x*x/(b*b):0,
+power:(x,b)=>Math.abs(x/b)<=1?Math.pow(1-Math.pow(Math.abs(x/b),3),3):0,
+loglogistic:(x,b)=>1/Math.pow(1+Math.abs(x/b),2),
+morters:(x,b)=>Math.abs(x/b)<=Math.PI?(1+Math.cos(x/b))/(2*Math.PI*b):0};
+const NAMES={laplace:"Laplace",triangular:"Triangular",gaussian:"Gaussian",epanechnikov:"Epanechnikov",logistic:"Logistic",loglogistic:"Log Logistic",cosine:"Cosine",sinc:"Sinc",quartic:"Quartic",parabolic:"Parabolic",exponential:"Exponential",silverman:"Silverman",cauchy:"Cauchy",tent:"Tent",wave:"Wave",power:"Power",morters:"Morters"};
+$("kernel").innerHTML=Object.entries(NAMES).map(([k,n])=>`<option value="${k}">${n}</option>`).join("");
+
+const SMAP=[[/bank|financial institution|finance|credit|mortgage|housing finance/,"Banks & Financials"],[/information technology|it services|software|computer/,"IT"],[/pharma|drug|healthcare|hospital|diagnostic|medical/,"Pharma & Healthcare"],[/automobile|auto component|tyre|two wheeler|passenger car|commercial vehicle/,"Auto"],[/oil|gas|petroleum|refiner|energy|power|electricity|renewable/,"Energy"],[/steel|metal|aluminium|copper|mining|coal|iron/,"Metals & Mining"],[/cement|construction|engineering|capital goods|industrial|electrical equipment/,"Industrials & Construction"],[/telecom|communication/,"Telecom"],[/fmcg|consumer food|personal care|household|tobacco/,"FMCG"],[/chemical|fertilizer|agro chemical|specialty chemical/,"Chemicals"],[/real estate|realty/,"Realty"],[/textile|garment|apparel/,"Textiles"],[/media|entertainment|broadcast/,"Media"],[/retail|consumer durable|consumer service|e-commerce/,"Consumer"],[/insurance/,"Insurance"],[/logistics|transport|shipping|airline|railway|port/,"Logistics"],[/defence|aerospace/,"Defence"],[/hotel|restaurant|tourism/,"Travel & Hospitality"]];
+function broad(ind){const x=(ind||"").toLowerCase();for(const[r,n]of SMAP)if(r.test(x))return n;return ind||"Other"}
+
+let rows=[],stop=false,sortK="rs";
+function csvLine(s){const a=[];let c="",q=false;for(let i=0;i<s.length;i++){const ch=s[i];if(ch==='"'){if(q&&s[i+1]==='"'){c+='"';i++}else q=!q}else if(ch===","&&!q){a.push(c);c=""}else c+=ch}a.push(c);return a}
+async function universe(){
+ for(const u of UNI_URLS){try{
+  const t=await fetch(u,{cache:"no-store"}).then(r=>{if(!r.ok)throw 0;return r.text()});
+  const L=t.trim().split(/\r?\n/),h=csvLine(L.shift()).map(x=>x.trim().toLowerCase());
+  let si=h.indexOf("symbol");if(si<0)si=2;const ii=h.indexOf("industry"),ci=h.indexOf("company name"),out=[];
+  for(const l of L){const c=csvLine(l),s=(c[si]||"").trim();if(s&&/^[A-Z0-9&.-]+$/.test(s))out.push({symbol:s,company:(c[ci]||s).trim(),sector:broad((c[ii]||"").trim())})}
+  if(out.length>=450)return{list:out,full:true};
+ }catch(e){}}
+ return{list:FALLBACK,full:false};
+}
+async function prices(tk,start,end){
+ const r=await fetch(DATA_API+"?tickers="+encodeURIComponent(tk.join(","))+"&start_date="+start+"&end_date="+end,{cache:"no-store"});
+ if(!r.ok)throw Error("Price service HTTP "+r.status);return r.json();
+}
+function extract(raw,t){
+ const o=raw&&raw.data?raw.data:raw,out=[];
+ if(o&&typeof o==="object"&&!Array.isArray(o))for(const[d,v]of Object.entries(o)){
+  if(!v||typeof v!=="object")continue;const x=v[t]??v;
+  if(x&&typeof x==="object"&&Number.isFinite(+x.close))out.push({date:d.slice(0,10),high:+x.high,low:+x.low,close:+x.close,volume:+(x.volume||0)});
+ }
+ return out.sort((a,b)=>a.date.localeCompare(b.date));
+}
+function weekly(a){
+ const m=new Map();
+ for(const b of a){const d=new Date(b.date+"T00:00:00Z");d.setUTCDate(d.getUTCDate()-((d.getUTCDay()+6)%7));const k=d.toISOString().slice(0,10);
+  const w=m.get(k);if(!w)m.set(k,{date:b.date,high:b.high,low:b.low,close:b.close,volume:b.volume});
+  else{w.high=Math.max(w.high,b.high);w.low=Math.min(w.low,b.low);w.close=b.close;w.volume+=b.volume;w.date=b.date}}
+ return[...m.values()];
+}
+function calc(a,bw,kn){
+ const fn=F[kn];if(!fn||a.length<Math.max(bw+2,22))return null;
+ const w=[];let sw=0;for(let i=0;i<bw;i++){const wt=fn(i*i/(bw*bw),1);w.push(wt);sw+=wt}
+ const kAt=t=>{let s=0;for(let i=0;i<bw;i++)s+=a[t-i].close*w[i];return s/sw};
+ const n=a.length-1,d=kAt(n)-kAt(n-1),pd=kAt(n-1)-kAt(n-2);
+ let signal="NEUTRAL";if(d>0&&pd<=0)signal="BUY";if(d<0&&pd>=0)signal="SELL";
+ let sg=0,val=0,cn=0,cv=0;
+ for(let i=Math.max(0,a.length-20);i<a.length;i++){const z=a[i],mf=(2*z.close-z.high-z.low)/Math.max(1e-9,z.high-z.low);sg+=mf*z.volume*z.close;val+=z.volume*z.close;cn+=mf*z.volume;cv+=z.volume}
+ return{price:a[n].close,signal,r5:n>=5?100*(a[n].close/a[n-5].close-1):0,r20:n>=20?100*(a[n].close/a[n-20].close-1):0,cmf:cv?cn/cv:0,flow:val?sg/1e7:0,date:a[n].date};
+}
+const fmt=(x,d=2)=>Number.isFinite(x)?x.toFixed(d):"—",cl=x=>x>=0?"pos":"neg";
+function sectors(){
+ const m={};for(const x of rows){const s=m[x.sector]??={sector:x.sector,n:0,r5:0,r20:0,rs:0,flow:0,buy:0,sell:0};s.n++;s.r5+=x.r5;s.r20+=x.r20;s.rs+=x.rs;s.flow+=x.flow;s.buy+=x.signal==="BUY";s.sell+=x.signal==="SELL"}
+ return Object.values(m).map(s=>({...s,r5:s.r5/s.n,r20:s.r20/s.n,rs:s.rs/s.n})).sort((a,b)=>b.rs-a.rs);
+}
+function render(){
+ const q=$("q").value.toUpperCase(),sg=$("sig").value,sc=$("sec").value;
+ const r=rows.filter(x=>(!q||x.symbol.includes(q)||x.company.toUpperCase().includes(q))&&(sg==="ALL"||x.signal===sg)&&(sc==="ALL"||x.sector===sc));
+ r.sort((a,b)=>sortK==="symbol"?a.symbol.localeCompare(b.symbol):b[sortK]-a[sortK]);
+ $("list").innerHTML=r.map(x=>`<div class="item"><div class="r"><span><b style="font-size:16px">${x.symbol}</b><span class="bd ${x.signal}">${x.signal}</span></span><b>₹${fmt(x.price)}</b></div>
+ <div class="r"><span class="mu">${x.sector} • ${x.date}</span></div>
+ <div class="r"><span class="${cl(x.rs)}">RS ${fmt(x.rs)}% (#${x.rank})</span><span class="${cl(x.r5)}">5b ${fmt(x.r5)}%</span><span class="${cl(x.r20)}">20b ${fmt(x.r20)}%</span></div>
+ <div class="r"><span class="${cl(x.cmf)}">CMF ${fmt(x.cmf,3)}</span><span class="${cl(x.flow)}">Flow ₹${fmt(x.flow)}Cr*</span></div></div>`).join("")||'<div class="mu">No stocks to show.</div>';
+ $("nU").textContent=rows.length;$("nB").textContent=rows.filter(x=>x.signal==="BUY").length;$("nS").textContent=rows.filter(x=>x.signal==="SELL").length;$("nR").textContent=rows.filter(x=>x.rs>=0).length;
+}
+function renderSectors(){
+ const S=sectors(),cur=$("sec").value;
+ $("sec").innerHTML='<option value="ALL">All sectors</option>'+S.map(s=>`<option>${s.sector}</option>`).join("");$("sec").value=S.some(s=>s.sector===cur)?cur:"ALL";
+ $("secList").innerHTML=S.map(s=>`<div class="item" data-s="${s.sector}"><div class="r"><b>${s.sector}</b><span class="mu">${s.n} stocks</span></div>
+ <div class="r"><span class="${cl(s.rs)}">RS ${fmt(s.rs)}%</span><span class="${cl(s.r5)}">5b ${fmt(s.r5)}%</span><span class="${cl(s.r20)}">20b ${fmt(s.r20)}%</span></div>
+ <div class="r"><span class="${cl(s.flow)}">Flow ₹${fmt(s.flow,0)}Cr*</span><span class="pos">BUY ${s.buy}</span><span class="neg">SELL ${s.sell}</span></div></div>`).join("");
+ document.querySelectorAll("#secList .item").forEach(e=>e.onclick=()=>{$("sec").value=e.dataset.s;tab(0);render()});
+}
+async function inst(){
+ try{const d=await fetch(INST_URL,{cache:"no-store"}).then(r=>r.json()),e=d.equity||{};
+  $("fii").textContent=fmt(e.fii_net,0);$("dii").textContent=fmt(e.dii_net,0);
+  $("fii").className=cl(e.fii_net);$("dii").className=cl(e.dii_net);
+  $("inst").innerHTML=`Latest session: <b>${d.date||"—"}</b><br>FII buy ₹${fmt(e.fii_buy)} Cr • sell ₹${fmt(e.fii_sell)} Cr • <b class="${cl(e.fii_net)}">net ${fmt(e.fii_net)} Cr</b><br>DII buy ₹${fmt(e.dii_buy)} Cr • sell ₹${fmt(e.dii_sell)} Cr • <b class="${cl(e.dii_net)}">net ${fmt(e.dii_net)} Cr</b>`;
+ }catch(e){$("inst").textContent="Institutional-flow feed unavailable right now."}
+}
+function tab(i){document.querySelectorAll(".tabs div").forEach(d=>d.classList.toggle("on",+d.dataset.t===i));[0,1,2].forEach(k=>$("tab"+k).hidden=k!==i)}
+document.querySelectorAll(".tabs div").forEach(d=>d.onclick=()=>tab(+d.dataset.t));
+const setSt=(t,err)=>{$("status").className="st"+(err?" err":"");$("status").firstChild.textContent=t};
+const prog=p=>$("pb").style.width=(p*100)+"%";
+
+async function scan(){
+ stop=false;rows=[];render();$("run").disabled=true;prog(0);
+ const bw=Math.max(2,Math.min(200,+$("bw").value||14)),kn=$("kernel").value,wk=$("tf").value==="1wk";
+ try{
+  setSt("Loading NIFTY 500 list…");const u=await universe();
+  const end=new Date(),start=new Date(end);start.setFullYear(start.getFullYear()-(wk?4:2));
+  const s=start.toISOString().slice(0,10),e=end.toISOString().slice(0,10),tk=u.list.map(x=>x.symbol+".NS");
+  let raw={data:{}};const size=75;
+  for(let i=0;i<tk.length&&!stop;i+=size){
+   setSt(`Downloading prices ${Math.min(i+size,tk.length)}/${tk.length}…`);prog(i/tk.length*.8);
+   const part=await prices(tk.slice(i,i+size),s,e);Object.assign(raw.data,part.data||part);
+  }
+  if(stop){setSt("Stopped.");return}
+  setSt("Loading benchmark…");
+  let ba=[];try{ba=extract(await prices(["^CRSLDX"],s,e),"^CRSLDX");if(wk)ba=weekly(ba)}catch(x){}
+  const bench=ba.length>=21?100*(ba.at(-1).close/ba.at(-21).close-1):0;
+  setSt("Calculating signals…");prog(.9);
+  for(const m of u.list){
+   let a=extract(raw,m.symbol+".NS");if(wk)a=weekly(a);
+   const c=calc(a,bw,kn);if(!c)continue;
+   Object.assign(c,{symbol:m.symbol,company:m.company,sector:m.sector,rs:c.r20-bench});rows.push(c);
+  }
+  const sr=[...rows].sort((a,b)=>b.rs-a.rs);rows.forEach(x=>x.rank=sr.indexOf(x)+1);
+  render();renderSectors();await inst();prog(1);
+  setSt(`Done: ${rows.length} stocks.`+(u.full?"":" (Used built-in large-cap list — full NIFTY 500 list couldn't be downloaded.)"));
+  if(!rows.length)setSt("No price data came back. The data service may be down or blocked — try again later.",true);
+ }catch(e){setSt("Error: "+e.message+" — check your internet connection and try again.",true)}
+ finally{$("run").disabled=false}
+}
+$("run").onclick=scan;$("stop").onclick=()=>stop=true;
+$("q").oninput=render;$("sig").onchange=render;$("sec").onchange=render;
+$("sort").onchange=()=>{sortK=$("sort").value;render()};
+inst();
+</script></body></html>
